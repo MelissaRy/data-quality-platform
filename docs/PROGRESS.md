@@ -71,48 +71,135 @@ Run to verify: `python scripts/generate_all.py`
 
 ---
 
-## Phase 2 — next to build
+## Phase 2 detail — COMPLETE
 
-### Goal
-Run quality checks against the generated data and store scored results in PostgreSQL.
-
-### PostgreSQL schema (to create)
+### PostgreSQL schema (`db/schema.sql`)
 ```
 sources          — id, name, system_type, description
 quality_runs     — id, source_id, run_at, status
-quality_metrics  — id, run_id, dimension, field, score (0–1), issue_count, total_count, detail
+quality_metrics  — id, run_id, dimension, field, score (0–1), issue_count, total_count, detail (JSONB)
 ```
 
-### Quality dimensions to implement (per source)
-| Dimension | What to check |
-|---|---|
-| Freshness | Max age of `last_updated` / `posted_date` vs threshold |
-| Completeness | % non-null for required fields |
-| Uniqueness | Duplicate rate on key fields (employee_id, transaction_id, customer_id) |
-| Consistency | e.g. close_date >= created_date; amount > 0 for Invoices |
-| Validity | Email format, allowed enum values (stage, currency), date plausibility |
-
-### Files to create
+### Files
 ```
 db/schema.sql            — CREATE TABLE statements
 db/bootstrap.py          — connects to PG and runs schema.sql
-checks/hr_checks.py      — quality check functions for HR data
-checks/finance_checks.py — quality check functions for Finance data
-checks/sales_checks.py   — quality check functions for Sales data
-checks/runner.py         — orchestrates: generate → check → store results
+checks/__init__.py
+checks/hr_checks.py      — 5 checks: freshness, completeness (manager_id), uniqueness (email), consistency (hire_date), validity (email)
+checks/finance_checks.py — 6 checks: freshness, completeness (cost_centre, currency), uniqueness (transaction_id), consistency (Invoice amounts), validity (Expense amounts)
+checks/sales_checks.py   — 6 checks: freshness (deal created_date), completeness (deal_owner), uniqueness (customer email), consistency (close_date, Closed Won revenue), validity (stage)
+checks/runner.py         — generates data, runs all checks, stores results, prints scored summary
 ```
 
-### How to run (target)
+### How to run
 ```bash
-# Start PostgreSQL (Docker)
+# Start PostgreSQL (Docker — only needed once)
 docker run -d --name dqp-pg -e POSTGRES_USER=dqp -e POSTGRES_PASSWORD=__REDACTED__ \
   -e POSTGRES_DB=dqp -p 5432:5432 postgres:16
 
-# Bootstrap schema
+# Bootstrap schema (idempotent — safe to re-run)
 python db/bootstrap.py
 
 # Run quality checks and store results
 python checks/runner.py
+```
+
+### Check result format
+Each check returns:
+```python
+{"dimension": str, "field": str|None, "score": float, "issue_count": int, "total_count": int, "detail": dict}
+```
+Score thresholds: ≥0.95 = OK, ≥0.80 = WARN, <0.80 = FAIL
+
+### Key implementation note
+HR and Sales generators give clones **new** IDs (EMP-9xxx, CUS-9xxx), so uniqueness is checked on `email` not the ID field. Finance duplicates reuse the same `transaction_id`, so ID-based uniqueness works there.
+
+### Observed scores (deterministic, seed=42)
+| Source | Dimension | Field | Score | Tag |
+|---|---|---|---|---|
+| HR | freshness | last_updated | 0.8724 | WARN |
+| HR | completeness | manager_id | 0.9276 | WARN |
+| HR | uniqueness | email | 0.9524 | OK |
+| HR | consistency | hire_date | 0.9543 | OK |
+| HR | validity | email | 0.9752 | OK |
+| Finance | freshness | posted_date | 1.0000 | OK |
+| Finance | completeness | cost_centre | 0.9380 | WARN |
+| Finance | completeness | currency | 0.9206 | WARN |
+| Finance | uniqueness | transaction_id | 0.9346 | WARN |
+| Finance | consistency | amount | 0.9492 | WARN |
+| Finance | validity | amount | 0.9641 | OK |
+| Sales | freshness | created_date | 0.2750 | **FAIL** |
+| Sales | completeness | deal_owner | 0.9533 | OK |
+| Sales | uniqueness | email | 0.9163 | WARN |
+| Sales | consistency | close_date | 0.9450 | WARN |
+| Sales | consistency | revenue | 0.9451 | WARN |
+| Sales | validity | stage | 0.9367 | WARN |
+
+Sales freshness FAIL is expected — deals go back to 2023 and the freshness window is 365 days; this is a deliberate quality story for the demo.
+
+---
+
+## Phase 3 — Neo4j lineage graph (NEXT)
+
+### Goal
+Model how data flows between sources and downstream assets, and show which quality failures have downstream impact.
+
+### Nodes
+| Label | Properties | Description |
+|---|---|---|
+| DataSource | name, system_type | HR, Finance, Sales |
+| Field | name, source_name | A column within a source |
+| QualityCheck | dimension, field, score, issue_count, run_at | Latest check result per dimension+field |
+| DownstreamAsset | name, type | e.g. "Payroll Report", "Board Dashboard", "Sales Forecast" |
+
+### Relationships
+| Relationship | From → To | Meaning |
+|---|---|---|
+| FEEDS_INTO | DataSource → DownstreamAsset | Source data is consumed by this asset |
+| HAS_CHECK | DataSource → QualityCheck | This source has this quality check |
+| IMPACTS | QualityCheck → DownstreamAsset | A failing check impacts this downstream asset |
+
+### Downstream assets to mock
+| Asset | Feeds from | Critical checks |
+|---|---|---|
+| Payroll Report | HR | completeness (manager_id), consistency (hire_date) |
+| Headcount Dashboard | HR | uniqueness (email), freshness (last_updated) |
+| AP Ledger | Finance | completeness (cost_centre, currency), uniqueness (transaction_id) |
+| Board Finance Pack | Finance | consistency (amount), validity (amount) |
+| Sales Forecast | Sales | validity (stage), consistency (close_date, revenue) |
+| Revenue Dashboard | Sales | uniqueness (email), completeness (deal_owner) |
+
+### Files to create
+```
+lineage/bootstrap.py     — clears and rebuilds Neo4j graph from latest quality_metrics in PG
+lineage/queries.py       — Cypher helpers: get_blast_radius(source), get_failing_checks()
+```
+
+### How to run
+```bash
+# Neo4j must be running — use the existing local instance on bolt://localhost:7687
+# (same one used by the Workplace Platform, or spin up a fresh Docker container)
+
+# Build the graph from latest PG results
+python lineage/bootstrap.py
+
+# Test blast-radius query
+python lineage/queries.py
+```
+
+### Cypher patterns to implement
+```cypher
+-- Blast radius: which assets are impacted by failing checks on a source?
+MATCH (s:DataSource {name: $source})-[:HAS_CHECK]->(c:QualityCheck)-[:IMPACTS]->(a:DownstreamAsset)
+WHERE c.score < 0.95
+RETURN c.dimension, c.field, c.score, collect(a.name) AS impacted_assets
+ORDER BY c.score ASC
+
+-- All failing checks across all sources
+MATCH (s:DataSource)-[:HAS_CHECK]->(c:QualityCheck)
+WHERE c.score < 0.95
+RETURN s.name, c.dimension, c.field, c.score
+ORDER BY c.score ASC
 ```
 
 ---
