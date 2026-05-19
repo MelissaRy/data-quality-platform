@@ -18,7 +18,7 @@ A portfolio project (potential SaaS) that monitors data quality across mock ente
 ## Phase status
 
 - [x] **Phase 1** — Mock data generators (`generators/`)
-- [ ] **Phase 2** — PostgreSQL metrics store + quality check pipeline
+- [x] **Phase 2** — PostgreSQL metrics store + quality check pipeline
 - [ ] **Phase 3** — Neo4j lineage graph
 - [ ] **Phase 4** — FastAPI API
 - [ ] **Phase 5** — React dashboard + AI chat interface
