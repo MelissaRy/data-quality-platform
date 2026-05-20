@@ -21,7 +21,7 @@ A portfolio project (potential SaaS) that monitors data quality across mock ente
 - [x] **Phase 2** — PostgreSQL metrics store + quality check pipeline
 - [x] **Phase 3** — Neo4j lineage graph
 - [x] **Phase 4** — FastAPI API
-- [ ] **Phase 5** — React dashboard + AI chat interface
+- [x] **Phase 5** — React dashboard + AI chat interface
 - [ ] **Phase 6** — Deployment (Render/Railway + Neo4j Aura free tier)
 
 ---
@@ -258,14 +258,64 @@ frontend/
 
 ---
 
-## Deployment plan (Phase 6)
+## Phase 5 detail — COMPLETE
 
+### Stack
+- Vite **5.4.x** + React 18 + Tailwind **3** + Recharts **2** + React Flow 11
+- **Important**: Vite 8 requires Node ≥20.19; system has 20.18.2 — locked to Vite 5.
+
+### Run locally
+```bash
+cd frontend && npm run dev          # Vite dev server on :5173, proxies /api → :8001
+# or for prod preview:
+npm run build                       # outputs to frontend/dist/ (served by FastAPI)
+```
+
+### Pages
+| Page | Route state | Data |
+|---|---|---|
+| Overview | `overview` | `GET /api/sources` — source cards + top issues table |
+| Source detail | `source:HR` etc. | `GET /api/sources/{name}` + `/api/runs/{name}` |
+| Lineage | `lineage` | `GET /api/lineage/{source}` — React Flow blast-radius graph |
+
+### AI chat (`POST /api/chat`)
+- Claude Haiku 4.5 with system prompt + quality metrics cached (`cache_control: ephemeral`)
+- Streaming SSE — ChatPanel reads chunks via `ReadableStream`
+- Rate limit: 20 messages/session (checked server-side)
+- Requires `ANTHROPIC_API_KEY` environment variable
+
+### Components
+`Tag` · `SourceCard` · `CheckTable` (score bar + tag) · `TrendChart` (Recharts LineChart) · `LineageGraph` (React Flow, animated edges for FAIL checks) · `ChatPanel` (streaming, bounce dots while loading)
+
+---
+
+## Phase 6 — Deployment (NEXT)
+
+### Plan
 | Service | Platform | Notes |
 |---|---|---|
-| FastAPI + React | Render or Railway | Free tier sufficient for demo |
-| PostgreSQL | Render managed PG or Railway | Free tier |
-| Neo4j | Neo4j Aura Free | 200K nodes, 400K relationships — enough |
+| FastAPI + React | Render web service | `npm run build` then FastAPI serves `frontend/dist/` via StaticFiles |
+| PostgreSQL | Render managed PG | Free tier |
+| Neo4j | Neo4j Aura Free | 200K nodes / 400K rels — sufficient |
 | Claude API | Anthropic | Haiku 4.5, pay-as-you-go |
+
+### Env vars needed on Render
+```
+DATABASE_URL          postgresql://...   (Render provides this)
+NEO4J_URI             neo4j+s://...      (Aura connection string)
+NEO4J_USER            neo4j
+NEO4J_PASSWORD        ...
+ANTHROPIC_API_KEY     sk-ant-...
+```
+
+### Steps
+1. Create Neo4j Aura Free instance → get connection string
+2. Create Render web service pointing at repo, set env vars
+3. Add `render.yaml` or configure build command:
+   - Build: `cd frontend && npm install && npm run build`
+   - Start: `python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+4. On first deploy: run `python db/bootstrap.py` and `python checks/runner.py` as one-off jobs
+5. Run `python lineage/bootstrap.py` to build Neo4j graph from Aura
 
 ---
 
