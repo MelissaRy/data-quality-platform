@@ -94,7 +94,7 @@ checks/runner.py         — generates data, runs all checks, stores results, pr
 ### How to run
 ```bash
 # Start PostgreSQL (Docker — only needed once)
-docker run -d --name dqp-pg -e POSTGRES_USER=dqp -e POSTGRES_PASSWORD=__REDACTED__ \
+docker run -d --name dqp-pg -e POSTGRES_USER=dqp -e POSTGRES_PASSWORD=<your-password> \
   -e POSTGRES_DB=dqp -p 5432:5432 postgres:16
 
 # Bootstrap schema (idempotent — safe to re-run)
@@ -141,7 +141,7 @@ Sales freshness FAIL is expected — deals go back to 2023 and the freshness win
 
 ## Phase 3 detail — COMPLETE
 
-Docker container: `dqp-neo4j` — bolt://localhost:7687, auth `neo4j/REDACTED`, browser at http://localhost:7474.
+Docker container: `dqp-neo4j` — bolt://localhost:7687, auth `neo4j/<your-password>`, browser at http://localhost:7474.
 
 ### Graph shape
 - **3** DataSource nodes (HR/HRIS, Finance/ERP, Sales/CRM)
@@ -339,13 +339,7 @@ uvicorn api.main:app        # starts the API
 ### Test locally with Docker
 ```bash
 docker build -t dqp-app .
-docker run --rm --network host \
-  -e DATABASE_URL="postgresql://dqp:__REDACTED__@localhost:5432/dqp" \
-  -e NEO4J_URI="bolt://localhost:7687" \
-  -e NEO4J_USER="neo4j" \
-  -e NEO4J_PASSWORD="__REDACTED__" \
-  -e PORT=8002 \
-  dqp-app
+docker run --rm --network host --env-file .env -e PORT=8002 dqp-app
 ```
 
 ---
