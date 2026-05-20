@@ -1,12 +1,20 @@
 import { Sparkline } from './Viz.jsx'
 
+function timeAgo(isoString) {
+  const diff = Date.now() - new Date(isoString).getTime()
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  if (h > 24) return `${Math.floor(h / 24)}d ago`
+  if (h > 0)  return `${h}h ago`
+  return `${m}m ago`
+}
+
 export default function Overview({ dq, setRoute }) {
-  const { SOURCES, DIMENSIONS, dimensionFor, sourceSummary, topIssues, headlineStats } = dq
+  const { SOURCES, SOURCE_ORDER, DIMENSIONS, INCIDENTS, dimensionFor, sourceSummary, topIssues, headlineStats } = dq
   const stats     = headlineStats()
   const issues    = topIssues()
-  const sourceIds = ['sales', 'finance', 'hr']
 
-  const now = new Date()
+  const now     = new Date()
   const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ' UTC'
   const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -20,10 +28,10 @@ export default function Overview({ dq, setRoute }) {
             <span>Overview</span>
           </div>
           <h1 className="screen-head__title">
-            Quality, across <em>three</em> sources
+            Quality, across <em>{SOURCE_ORDER.length}</em> sources
           </h1>
           <p className="screen-head__subtitle">
-            A calm snapshot of every dimension on every connected source.
+            A live snapshot of every dimension on every connected source.
             Refreshes itself every minute — last sweep finished just now.
           </p>
         </div>
@@ -34,7 +42,34 @@ export default function Overview({ dq, setRoute }) {
         </div>
       </header>
 
-      {/* Headline strip */}
+      {/* Business Impact Strip */}
+      <div className="impact-strip">
+        <div className="impact-strip__cell">
+          <div className="impact-strip__label">Daily financial risk</div>
+          <div className="impact-strip__value impact-strip__value--risk">
+            £{stats.totalRisk.toLocaleString()}
+          </div>
+          <div className="impact-strip__sub">across <em>{SOURCE_ORDER.length} sources</em></div>
+        </div>
+        <div className="impact-strip__cell">
+          <div className="impact-strip__label">Open incidents</div>
+          <div className={'impact-strip__value' + (stats.openIncidents > 0 ? ' impact-strip__value--warning' : '')}>
+            {stats.openIncidents}
+          </div>
+          <div className="impact-strip__sub">
+            {stats.slaBreaches > 0
+              ? `${stats.slaBreaches} SLA breach${stats.slaBreaches === 1 ? '' : 'es'} · escalated`
+              : 'all within SLA'}
+          </div>
+        </div>
+        <div className="impact-strip__cell">
+          <div className="impact-strip__label">Rows flagged</div>
+          <div className="impact-strip__value">{stats.totalIssues.toLocaleString()}</div>
+          <div className="impact-strip__sub">across {stats.totalChecks} active checks</div>
+        </div>
+      </div>
+
+      {/* Headline stats */}
       <div className="headline">
         <div className="headline__stat">
           <div className="headline__stat__label">Composite</div>
@@ -69,7 +104,7 @@ export default function Overview({ dq, setRoute }) {
             <span className="unit">/ {stats.totalChecks}</span>
           </div>
           <div className="headline__stat__sub">
-            <span>across {sourceIds.length} sources · trending stable</span>
+            <span>across {SOURCE_ORDER.length} sources · trending stable</span>
           </div>
         </div>
 
@@ -88,7 +123,7 @@ export default function Overview({ dq, setRoute }) {
       <section className="section">
         <header className="section__head">
           <h2 className="section__title">Sources <em>×</em> Dimensions</h2>
-          <div className="section__counter">{sourceIds.length} sources · {DIMENSIONS.length} dimensions</div>
+          <div className="section__counter">{SOURCE_ORDER.length} sources · {DIMENSIONS.length} dimensions</div>
         </header>
 
         <div className="heatmap">
@@ -98,7 +133,7 @@ export default function Overview({ dq, setRoute }) {
             <div className="heatmap__cell">Composite</div>
           </div>
 
-          {sourceIds.map(sid => {
+          {SOURCE_ORDER.map(sid => {
             const src     = SOURCES[sid]
             const summary = sourceSummary(sid)
             return (
@@ -183,6 +218,51 @@ export default function Overview({ dq, setRoute }) {
           ))}
         </div>
       </section>
+
+      {/* Incident feed */}
+      {INCIDENTS && INCIDENTS.length > 0 && (
+        <section className="section">
+          <header className="section__head">
+            <h2 className="section__title">Incident <em>feed</em></h2>
+            <div className="section__counter">{stats.openIncidents} open · {INCIDENTS.length} total</div>
+          </header>
+
+          <div className="incidents">
+            {INCIDENTS.map((inc, i) => (
+              <div key={i} className="incident">
+                <div>
+                  <span className={'incident__sev incident__sev--' + inc.severity}>
+                    {inc.severity}
+                  </span>
+                </div>
+
+                <div className="incident__body">
+                  <div className="incident__header">
+                    <span className="incident__id">{inc.id}</span>
+                    <span className="incident__title">{inc.title}</span>
+                  </div>
+                  <div className="incident__detail">{inc.detail}</div>
+                  <div className="incident__meta">
+                    <span>Owner: {inc.owner}</span>
+                    <span>{timeAgo(inc.detectedAt)}</span>
+                    {inc.affectedAssets.map((a, ai) => (
+                      <span key={ai} style={{ opacity: 0.7 }}>{a}</span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="incident__side">
+                  <span className={'incident__status incident__status--' + inc.status}>
+                    {inc.status}
+                  </span>
+                  {inc.slaBreached && <span className="incident__sla-tag">SLA breached</span>}
+                  <span className="incident__impact">{inc.impact}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

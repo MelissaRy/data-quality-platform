@@ -16,11 +16,11 @@ export default function App() {
     fetchDQ().then(setDq)
   }, [])
 
-  // Hash-based routing
+  // Hash-based routing — accepts any value, screen switch handles unknown routes
   useEffect(() => {
     const fromHash = () => {
       const h = (window.location.hash || '').replace(/^#\/?/, '') || 'overview'
-      if (['overview', 'hr', 'finance', 'sales', 'lineage'].includes(h)) setRoute(h)
+      setRoute(h || 'overview')
     }
     fromHash()
     window.addEventListener('hashchange', fromHash)
@@ -55,14 +55,10 @@ export default function App() {
   }
 
   const screen = (() => {
-    switch (route) {
-      case 'overview': return <Overview dq={dq} setRoute={setRoute} key="ov" />
-      case 'lineage':  return <Lineage  dq={dq} key="ln" />
-      case 'hr':
-      case 'finance':
-      case 'sales':    return <Source   dq={dq} sourceId={route} key={route} />
-      default:         return <Overview dq={dq} setRoute={setRoute} />
-    }
+    if (route === 'overview') return <Overview dq={dq} setRoute={setRoute} key="ov" />
+    if (route === 'lineage')  return <Lineage  dq={dq} key="ln" />
+    if (dq.SOURCES[route])   return <Source   dq={dq} sourceId={route} key={route} />
+    return <Overview dq={dq} setRoute={setRoute} key="ov-fallback" />
   })()
 
   return (

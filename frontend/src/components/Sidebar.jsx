@@ -1,7 +1,7 @@
 export default function Sidebar({ route, setRoute, dq, onOpenAssistant }) {
-  const { SOURCES, sourceSummary } = dq
+  const { SOURCES, SOURCE_ORDER, LINEAGE, sourceSummary } = dq
 
-  const sources = ['sales', 'finance', 'hr'].map(id => ({
+  const sources = SOURCE_ORDER.map(id => ({
     id,
     name:    SOURCES[id].name,
     summary: sourceSummary(id),
@@ -14,6 +14,8 @@ export default function Sidebar({ route, setRoute, dq, onOpenAssistant }) {
     if (summary.counts.watch > 0) return `${summary.counts.watch} watching`
     return 'all good'
   }
+
+  const totalDownstream = Object.values(LINEAGE).reduce((s, l) => s + l.downstream.length, 0)
 
   const navItem = (id, label, opts = {}) => (
     <button
@@ -50,7 +52,7 @@ export default function Sidebar({ route, setRoute, dq, onOpenAssistant }) {
         )}
 
         <div className="nav__group" style={{ marginTop: 16 }}>Analysis</div>
-        {navItem('lineage', 'Lineage & impact', { count: '3' })}
+        {navItem('lineage', 'Lineage & impact', { count: `${totalDownstream}` })}
       </nav>
 
       <div className="sidebar__footer">

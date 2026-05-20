@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 const TREND_COLORS = [
   'oklch(0.62 0.135 45)',
   'oklch(0.58 0.105 155)',
@@ -97,12 +99,29 @@ function DistChart({ checks, scoreStatus }) {
   )
 }
 
+function complianceTag(risk) {
+  if (!risk) return null
+  return risk.split(' — ')[0]
+}
+
+function changeVerb(change) {
+  if (!change) return 'changed'
+  if (change.toLowerCase().startsWith('type changed')) return 'type_changed'
+  return change.toLowerCase().split(' ')[0]
+}
+
 export default function Source({ dq, sourceId }) {
+  const [expandedIdx, setExpandedIdx] = useState(null)
   const { SOURCES, scoreStatus, sourceSummary, STATUS_LABEL } = dq
   const src             = SOURCES[sourceId]
   const summary         = sourceSummary(sourceId)
   const composite       = summary.avg
   const compositeStatus = scoreStatus(composite)
+
+  const toggleExpand = (idx) =>
+    setExpandedIdx(e => e === idx ? null : idx)
+
+  const impact = src.businessImpact
 
   return (
     <div className="fade-in">
@@ -121,8 +140,26 @@ export default function Source({ dq, sourceId }) {
         <div className="screen-head__meta">
           <strong>Last run · just now</strong>
           <span>{src.checks.length} checks · {src.runs.length} historical runs</span>
+          {src.table && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, opacity: 0.6 }}>{src.table}</span>}
         </div>
       </header>
+
+      {/* Business Impact Card */}
+      {impact && impact.dailyRisk > 0 && (
+        <div className="impact-card">
+          <div className="impact-card__main">
+            <div className="impact-card__label">Daily financial risk</div>
+            <div className="impact-card__value">
+              {impact.currency}{impact.dailyRisk.toLocaleString()}
+            </div>
+          </div>
+          <div className="impact-card__detail">{impact.description}</div>
+          <div className="impact-card__reports">
+            <strong>{impact.affectedReports}</strong>
+            <span>affected reports</span>
+          </div>
+        </div>
+      )}
 
       {/* Source meta strip */}
       <div className="source-meta">
@@ -169,44 +206,119 @@ export default function Source({ dq, sourceId }) {
         </div>
       </section>
 
+      {/* Schema drift events */}
+      {src.schemaEvents && src.schemaEvents.length > 0 && (
+        <section className="section">
+          <header className="section__head">
+            <h2 className="section__title">Schema <em>drift</em></h2>
+            <div className="section__counter">{src.schemaEvents.length} event{src.schemaEvents.length === 1 ? '' : 's'} detected</div>
+          </header>
+          <div className="schema-events">
+            {src.schemaEvents.map((evt, i) => (
+              <div key={i} className="schema-event">
+                <span className={'schema-event__type schema-event__type--' + changeVerb(evt.change)}>
+                  {changeVerb(evt.change).replace('_', ' ')}
+                </span>
+                <code className="schema-event__column">{evt.column}</code>
+                <span className="schema-event__note">{evt.note}</span>
+                <span className="schema-event__meta">{evt.detectedAt}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Quality checks */}
       <section className="section">
         <header className="section__head">
           <h2 className="section__title">Quality checks</h2>
-          <div className="section__counter">sorted by score · ascending</div>
+          <div className="section__counter">sorted by score · ascending · click to expand</div>
         </header>
         <div className="checks">
           {src.checks.map((chk, idx) => {
             const status    = scoreStatus(chk.score)
             const fillWidth = Math.min(100, chk.score * 100)
+            const expanded  = expandedIdx === idx
+            const tag       = complianceTag(chk.complianceRisk)
+            const isPCI     = chk.complianceRisk?.startsWith('PCI')
+            const hasSamples = chk.samples && chk.samples.length > 0
+            const sampleKeys = hasSamples ? Object.keys(chk.samples[0]) : []
+
             return (
-              <div key={idx} className="check">
-                <span className={'check__bar check__bar--' + status} />
-                <div className="check__dim">
-                  <div className="check__dim__name">{chk.dimension}</div>
-                  <div className={'check__dim__status check__dim__status--' + status}>{STATUS_LABEL[status]}</div>
-                </div>
-                <div className="check__field">
-                  <span className="check__field__label">Field</span>
-                  <span className="check__field__name">{chk.field}</span>
-                </div>
-                <div className="check__viz">
-                  <div className="check__viz__bar">
-                    <div className={'check__viz__bar__fill check__viz__bar__fill--' + status} style={{ width: fillWidth + '%' }} />
-                    <div className="check__viz__bar__threshold" style={{ left: '80%' }} />
-                    <div className="check__viz__bar__threshold" style={{ left: '95%' }} />
+              <div key={idx} className="check-wrap">
+                <div className="check" onClick={() => toggleExpand(idx)}>
+                  <span className={'check__bar check__bar--' + status} />
+                  <div className="check__dim">
+                    <div className="check__dim__name">{chk.dimension}</div>
+                    <div className={'check__dim__status check__dim__status--' + status}>{STATUS_LABEL[status]}</div>
+                    {tag && (
+                      <div className={'check__compliance' + (isPCI ? ' check__compliance--pci' : '')}>
+                        ⚠ {tag}
+                      </div>
+                    )}
                   </div>
-                  <div className="check__viz__legend">
-                    <span>0%</span><span>80</span><span>95</span><span>100%</span>
+                  <div className="check__field">
+                    <span className="check__field__label">Field</span>
+                    <span className="check__field__name">{chk.field}</span>
+                  </div>
+                  <div className="check__viz">
+                    <div className="check__viz__bar">
+                      <div className={'check__viz__bar__fill check__viz__bar__fill--' + status} style={{ width: fillWidth + '%' }} />
+                      <div className="check__viz__bar__threshold" style={{ left: '80%' }} />
+                      <div className="check__viz__bar__threshold" style={{ left: '95%' }} />
+                    </div>
+                    <div className="check__viz__legend">
+                      <span>0%</span><span>80</span><span>95</span><span>100%</span>
+                    </div>
+                  </div>
+                  <div className={'check__score check__score--' + status}>
+                    {(chk.score * 100).toFixed(1)}<span className="pct">%</span>
+                  </div>
+                  <div className="check__issues">
+                    <strong>{chk.issues.toLocaleString()}</strong>
+                    <span>of {chk.total.toLocaleString()} rows</span>
+                    <div className="check__toggle-hint">
+                      <span className={'check__toggle-hint__arrow' + (expanded ? ' check__toggle-hint__arrow--open' : '')}>▶</span>
+                      <span>{expanded ? 'collapse' : 'expand'}</span>
+                    </div>
                   </div>
                 </div>
-                <div className={'check__score check__score--' + status}>
-                  {(chk.score * 100).toFixed(1)}<span className="pct">%</span>
-                </div>
-                <div className="check__issues">
-                  <strong>{chk.issues.toLocaleString()}</strong>
-                  <span>of {chk.total.toLocaleString()} rows</span>
-                </div>
+
+                {expanded && (
+                  <div className="check-expansion">
+                    {chk.complianceRisk && (
+                      <div className={'check-expansion__compliance' + (isPCI ? ' check-expansion__compliance--pci' : '')}>
+                        ⚠ {chk.complianceRisk}
+                      </div>
+                    )}
+                    {chk.businessImpact && (
+                      <div className="check-expansion__biz">
+                        <strong>Impact</strong>{chk.businessImpact}
+                      </div>
+                    )}
+                    {hasSamples && (
+                      <div>
+                        <div className="check-expansion__samples-head">Sample failing rows</div>
+                        <table className="check-expansion__table">
+                          <thead>
+                            <tr>{sampleKeys.map(k => <th key={k}>{k}</th>)}</tr>
+                          </thead>
+                          <tbody>
+                            {chk.samples.map((row, ri) => (
+                              <tr key={ri}>
+                                {sampleKeys.map(k => (
+                                  <td key={k} title={String(row[k])}>
+                                    {row[k] === null ? <em style={{ opacity: 0.4 }}>null</em> : String(row[k])}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
