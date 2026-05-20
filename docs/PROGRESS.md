@@ -19,8 +19,8 @@ A portfolio project (potential SaaS) that monitors data quality across mock ente
 
 - [x] **Phase 1** — Mock data generators (`generators/`)
 - [x] **Phase 2** — PostgreSQL metrics store + quality check pipeline
-- [ ] **Phase 3** — Neo4j lineage graph
-- [ ] **Phase 4** — FastAPI API
+- [x] **Phase 3** — Neo4j lineage graph
+- [x] **Phase 4** — FastAPI API
 - [ ] **Phase 5** — React dashboard + AI chat interface
 - [ ] **Phase 6** — Deployment (Render/Railway + Neo4j Aura free tier)
 
@@ -139,79 +139,122 @@ Sales freshness FAIL is expected — deals go back to 2023 and the freshness win
 
 ---
 
-## Phase 3 — Neo4j lineage graph (NEXT)
+## Phase 3 detail — COMPLETE
 
-### Goal
-Model how data flows between sources and downstream assets, and show which quality failures have downstream impact.
+Docker container: `dqp-neo4j` — bolt://localhost:7687, auth `neo4j/REDACTED`, browser at http://localhost:7474.
 
-### Nodes
-| Label | Properties | Description |
-|---|---|---|
-| DataSource | name, system_type | HR, Finance, Sales |
-| Field | name, source_name | A column within a source |
-| QualityCheck | dimension, field, score, issue_count, run_at | Latest check result per dimension+field |
-| DownstreamAsset | name, type | e.g. "Payroll Report", "Board Dashboard", "Sales Forecast" |
+### Graph shape
+- **3** DataSource nodes (HR/HRIS, Finance/ERP, Sales/CRM)
+- **6** DownstreamAsset nodes (Payroll Report, Headcount Dashboard, AP Ledger, Board Finance Pack, Sales Forecast, Revenue Dashboard)
+- **17** QualityCheck nodes (one per check result, properties: source_name, dimension, field, score, issue_count, total_count, run_at)
+- **6** FEEDS_INTO · **17** HAS_CHECK · **15** IMPACTS relationships
 
-### Relationships
-| Relationship | From → To | Meaning |
-|---|---|---|
-| FEEDS_INTO | DataSource → DownstreamAsset | Source data is consumed by this asset |
-| HAS_CHECK | DataSource → QualityCheck | This source has this quality check |
-| IMPACTS | QualityCheck → DownstreamAsset | A failing check impacts this downstream asset |
-
-### Downstream assets to mock
-| Asset | Feeds from | Critical checks |
-|---|---|---|
-| Payroll Report | HR | completeness (manager_id), consistency (hire_date) |
-| Headcount Dashboard | HR | uniqueness (email), freshness (last_updated) |
-| AP Ledger | Finance | completeness (cost_centre, currency), uniqueness (transaction_id) |
-| Board Finance Pack | Finance | consistency (amount), validity (amount) |
-| Sales Forecast | Sales | validity (stage), consistency (close_date, revenue) |
-| Revenue Dashboard | Sales | uniqueness (email), completeness (deal_owner) |
-
-### Files to create
+### Files
 ```
-lineage/bootstrap.py     — clears and rebuilds Neo4j graph from latest quality_metrics in PG
-lineage/queries.py       — Cypher helpers: get_blast_radius(source), get_failing_checks()
+lineage/__init__.py
+lineage/bootstrap.py   — reads latest PG metrics, wipes + rebuilds Neo4j graph (idempotent)
+lineage/queries.py     — blast_radius(source) and failing_checks() with CLI output
 ```
 
 ### How to run
 ```bash
-# Neo4j must be running — use the existing local instance on bolt://localhost:7687
-# (same one used by the Workplace Platform, or spin up a fresh Docker container)
-
-# Build the graph from latest PG results
-python lineage/bootstrap.py
-
-# Test blast-radius query
-python lineage/queries.py
-```
-
-### Cypher patterns to implement
-```cypher
--- Blast radius: which assets are impacted by failing checks on a source?
-MATCH (s:DataSource {name: $source})-[:HAS_CHECK]->(c:QualityCheck)-[:IMPACTS]->(a:DownstreamAsset)
-WHERE c.score < 0.95
-RETURN c.dimension, c.field, c.score, collect(a.name) AS impacted_assets
-ORDER BY c.score ASC
-
--- All failing checks across all sources
-MATCH (s:DataSource)-[:HAS_CHECK]->(c:QualityCheck)
-WHERE c.score < 0.95
-RETURN s.name, c.dimension, c.field, c.score
-ORDER BY c.score ASC
+python lineage/bootstrap.py   # rebuild graph from latest PG run
+python lineage/queries.py     # print blast radius per source
 ```
 
 ---
 
-## AI interface design (Phase 5)
+## Phase 4 detail — COMPLETE
 
-- **Model**: Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) — cheapest, ~$1/1M input tokens
-- **Prompt caching**: system prompt + quality metrics summary cached → ~90% cost reduction
-- **Estimated cost**: ~€0.30 per 1,000 queries with caching
-- **Rate limit**: 20 queries/session to guard against runaway cost
-- **Capabilities**: NL Q&A on quality scores, root cause suggestions, fix prioritisation, lineage impact explanation
-- **Implementation**: streaming responses, multi-turn conversation in React state, tool calls to FastAPI endpoints
+FastAPI API backed by asyncpg (Postgres) and async Neo4j driver.
+
+**Run from project root:**
+```bash
+python -m uvicorn api.main:app --port 8001
+# Note: port 8001 — port 8000 is taken by the Workplace Platform API
+```
+
+### Endpoints
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Liveness check |
+| GET | `/api/sources` | All sources with latest check scores + tags |
+| GET | `/api/sources/{name}` | Single source detail |
+| GET | `/api/runs/{source}` | Full run history with all metrics per run |
+| GET | `/api/lineage/{source}` | Blast radius: failing checks + impacted assets |
+| GET | `/api/lineage` | All failing checks across sources with downstream impact |
+
+### Files
+```
+api/__init__.py
+api/main.py              — FastAPI app, CORS, lifespan, router registration
+api/db.py                — asyncpg pool + async Neo4j driver, get_pg()/get_neo4j() deps
+api/routers/sources.py   — /api/sources and /api/sources/{name}
+api/routers/runs.py      — /api/runs/{source}
+api/routers/lineage.py   — /api/lineage and /api/lineage/{source}
+```
+
+### Score tags
+- `OK` — score ≥ 0.95
+- `WARN` — score ≥ 0.80
+- `FAIL` — score < 0.80
+
+---
+
+## Phase 5 — React dashboard + AI chat (NEXT)
+
+### Goal
+Dark-themed React SPA consuming the Phase 4 API. Three views: overview, source detail (with history chart), lineage explorer. Plus an AI chat panel powered by Claude Haiku 4.5.
+
+### Pages / components
+| Component | Data source | Library |
+|---|---|---|
+| Overview — source cards with overall health | `GET /api/sources` | Recharts RadialBar or simple score badge |
+| Source detail — check breakdown + run history trend | `GET /api/sources/{name}` + `/api/runs/{name}` | Recharts LineChart |
+| Lineage explorer — graph of failing checks → assets | `GET /api/lineage/{source}` | React Flow |
+| AI chat panel — streaming, multi-turn | `POST /api/chat` (Phase 5 endpoint) | Anthropic SDK (server-side) |
+
+### AI chat endpoint to add to API (`api/routers/chat.py`)
+- `POST /api/chat` — accepts `{messages: [...], source?: str}`
+- Server-side: builds context from latest `/api/sources` + `/api/lineage` data
+- Calls Claude Haiku 4.5 with prompt caching (system prompt + metrics summary cached)
+- Returns streaming SSE response
+- Rate limit: 20 messages/session (tracked server-side in memory)
+
+### AI cost strategy
+- Model: `claude-haiku-4-5-20251001` — ~$1/1M input, $5/1M output
+- Cache: system prompt + quality metrics JSON (~2K tokens) → cache_control: ephemeral
+- Estimated: ~€0.30 per 1,000 queries with caching
+- Rate limit: 20 queries/session guards against runaway cost
+
+### Tech choices
+- Vite + React 18 (no Next.js — simpler for a portfolio SPA)
+- Tailwind CSS for dark theme
+- Recharts for score/trend charts
+- React Flow for lineage graph
+- Tanstack Query for data fetching + caching
+
+### File structure to create
+```
+frontend/
+  index.html
+  vite.config.js
+  src/
+    main.jsx
+    App.jsx
+    pages/
+      Overview.jsx
+      SourceDetail.jsx
+      Lineage.jsx
+    components/
+      SourceCard.jsx
+      CheckTable.jsx
+      TrendChart.jsx
+      LineageGraph.jsx
+      ChatPanel.jsx
+    api/
+      client.js         — fetch wrappers for all API endpoints
+```
 
 ---
 
