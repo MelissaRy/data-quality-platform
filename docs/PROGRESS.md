@@ -22,7 +22,7 @@ A portfolio project (potential SaaS) that monitors data quality across mock ente
 - [x] **Phase 3** — Neo4j lineage graph
 - [x] **Phase 4** — FastAPI API
 - [x] **Phase 5** — React dashboard + AI chat interface
-- [ ] **Phase 6** — Deployment (Render/Railway + Neo4j Aura free tier)
+- [x] **Phase 6** — Deployment (Render/Railway + Neo4j Aura free tier)
 
 ---
 
@@ -308,14 +308,45 @@ NEO4J_PASSWORD        ...
 ANTHROPIC_API_KEY     sk-ant-...
 ```
 
-### Steps
-1. Create Neo4j Aura Free instance → get connection string
-2. Create Render web service pointing at repo, set env vars
-3. Add `render.yaml` or configure build command:
-   - Build: `cd frontend && npm install && npm run build`
-   - Start: `python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT`
-4. On first deploy: run `python db/bootstrap.py` and `python checks/runner.py` as one-off jobs
-5. Run `python lineage/bootstrap.py` to build Neo4j graph from Aura
+### Files (committed)
+```
+Dockerfile        — python:3.12-slim + Node 20 + frontend build + app code
+start.sh          — bootstraps PG → runs checks → builds lineage (|| warn) → starts uvicorn
+render.yaml       — Render infra-as-code: Docker web service + free PG database
+.dockerignore     — excludes node_modules, dist, .git
+.python-version   — 3.12
+requirements.txt  — pinned to versions verified locally
+```
+
+### How to deploy
+1. **Neo4j Aura Free** — create instance at [console.neo4j.io](https://console.neo4j.io). Copy connection URI (`neo4j+s://...`) and password.
+2. **Render** — connect the GitHub repo. Render picks up `render.yaml` automatically.
+3. **Set env vars** in Render dashboard:
+   - `NEO4J_URI` = `neo4j+s://<id>.databases.neo4j.io`
+   - `NEO4J_PASSWORD` = (from Aura console)
+   - `ANTHROPIC_API_KEY` = (from console.anthropic.com)
+   - `NEO4J_USER` is already set to `neo4j` in render.yaml
+4. **Deploy** — Render builds the Docker image, `start.sh` handles all first-run setup automatically.
+
+### Startup sequence (automatic on every deploy)
+```
+python db/bootstrap.py     # idempotent — CREATE TABLE IF NOT EXISTS
+python checks/runner.py    # generates data + runs all quality checks
+python lineage/bootstrap.py # clears + rebuilds Neo4j graph (skipped if unavailable)
+uvicorn api.main:app        # starts the API
+```
+
+### Test locally with Docker
+```bash
+docker build -t dqp-app .
+docker run --rm --network host \
+  -e DATABASE_URL="postgresql://dqp:__REDACTED__@localhost:5432/dqp" \
+  -e NEO4J_URI="bolt://localhost:7687" \
+  -e NEO4J_USER="neo4j" \
+  -e NEO4J_PASSWORD="__REDACTED__" \
+  -e PORT=8002 \
+  dqp-app
+```
 
 ---
 
