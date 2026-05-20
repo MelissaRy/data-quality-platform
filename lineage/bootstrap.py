@@ -158,10 +158,12 @@ def main():
     try:
         with driver.session() as session:
             build_graph(session, metrics)
+        print("Done.")
+    except Exception as e:
+        print(f"Neo4j error: {e}")
+        raise
     finally:
         driver.close()
-
-    print("Done.")
 
 
 if __name__ == "__main__":
