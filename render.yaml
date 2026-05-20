@@ -16,6 +16,8 @@ services:
         sync: false          # set manually from Aura console
       - key: ANTHROPIC_API_KEY
         sync: false          # set manually from console.anthropic.com
+      - key: ALLOWED_ORIGINS
+        sync: false          # set to your Render service URL, e.g. https://data-quality-platform.onrender.com
 
 databases:
   - name: dqp-postgres

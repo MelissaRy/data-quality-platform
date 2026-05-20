@@ -1,10 +1,11 @@
 import json
+from typing import Annotated, Literal
 
 import anthropic
 import asyncpg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
 from api.db import get_pg
 
@@ -13,15 +14,16 @@ router = APIRouter()
 _client = anthropic.AsyncAnthropic()
 MODEL = "claude-haiku-4-5-20251001"
 MAX_MESSAGES = 20
+MAX_CONTENT_LEN = 4_000
 
 
 class Message(BaseModel):
-    role: str
-    content: str
+    role: Literal["user", "assistant"]
+    content: Annotated[str, StringConstraints(max_length=MAX_CONTENT_LEN)]
 
 
 class ChatRequest(BaseModel):
-    messages: list[Message]
+    messages: Annotated[list[Message], Field(min_length=1, max_length=MAX_MESSAGES)]
 
 
 async def _quality_context(pool: asyncpg.Pool) -> str:
@@ -62,22 +64,24 @@ async def _generate(messages: list[dict], context: str):
         }
     ]
 
-    async with _client.messages.stream(
-        model=MODEL,
-        max_tokens=512,
-        system=system,
-        messages=messages,
-    ) as stream:
-        async for text in stream.text_stream:
-            yield f"data: {json.dumps({'content': text})}\n\n"
+    try:
+        async with _client.messages.stream(
+            model=MODEL,
+            max_tokens=512,
+            system=system,
+            messages=messages,
+        ) as stream:
+            async for text in stream.text_stream:
+                yield f"data: {json.dumps({'content': text})}\n\n"
+    except anthropic.AuthenticationError:
+        yield f"data: {json.dumps({'content': 'AI assistant is not configured (missing API key).'})}\n\n"
+    except anthropic.APIConnectionError:
+        yield f"data: {json.dumps({'content': 'Could not reach the AI service. Please try again.'})}\n\n"
     yield "data: [DONE]\n\n"
 
 
 @router.post("/chat")
 async def chat(req: ChatRequest, pool: asyncpg.Pool = Depends(get_pg)):
-    if len(req.messages) > MAX_MESSAGES:
-        return {"error": "Session message limit reached (20)"}
-
     context = await _quality_context(pool)
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
 

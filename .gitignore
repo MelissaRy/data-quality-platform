@@ -1,7 +1,15 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# env files — never commit real credentials
 .env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+
 .venv/
 venv/
 *.egg-info/

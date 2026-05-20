@@ -1,74 +1,76 @@
-import { useState } from 'react'
-import Overview from './pages/Overview'
-import SourceDetail from './pages/SourceDetail'
-import Lineage from './pages/Lineage'
-import ChatPanel from './components/ChatPanel'
-
-const NAV = [
-  { id: 'overview',       label: 'Overview' },
-  { id: 'source:HR',      label: 'HR' },
-  { id: 'source:Finance', label: 'Finance' },
-  { id: 'source:Sales',   label: 'Sales' },
-  { id: 'lineage',        label: 'Lineage' },
-]
+import { useState, useEffect } from 'react'
+import { fetchDQ } from './dq.js'
+import Sidebar    from './components/Sidebar.jsx'
+import Overview   from './components/Overview.jsx'
+import Source     from './components/Source.jsx'
+import Lineage    from './components/Lineage.jsx'
+import Assistant  from './components/Assistant.jsx'
+import Tweaks     from './components/Tweaks.jsx'
 
 export default function App() {
-  const [page, setPage] = useState('overview')
-  const [chatOpen, setChatOpen] = useState(false)
+  const [dq, setDq]                   = useState(null)
+  const [route, setRoute]             = useState('overview')
+  const [assistantOpen, setAssistant] = useState(false)
 
-  function renderPage() {
-    if (page === 'overview') return <Overview onSelectSource={s => setPage(`source:${s}`)} />
-    if (page.startsWith('source:')) return <SourceDetail source={page.split(':')[1]} />
-    if (page === 'lineage') return <Lineage />
-    return null
+  useEffect(() => {
+    fetchDQ().then(setDq)
+  }, [])
+
+  // Hash-based routing
+  useEffect(() => {
+    const fromHash = () => {
+      const h = (window.location.hash || '').replace(/^#\/?/, '') || 'overview'
+      if (['overview', 'hr', 'finance', 'sales', 'lineage'].includes(h)) setRoute(h)
+    }
+    fromHash()
+    window.addEventListener('hashchange', fromHash)
+    return () => window.removeEventListener('hashchange', fromHash)
+  }, [])
+
+  useEffect(() => {
+    window.location.hash = '/' + route
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [route])
+
+  // Cmd/Ctrl+K to open assistant
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setAssistant(v => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  if (!dq) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--fg-dim)' }}>
+          Loading…
+        </div>
+      </div>
+    )
   }
 
+  const screen = (() => {
+    switch (route) {
+      case 'overview': return <Overview dq={dq} setRoute={setRoute} key="ov" />
+      case 'lineage':  return <Lineage  dq={dq} key="ln" />
+      case 'hr':
+      case 'finance':
+      case 'sales':    return <Source   dq={dq} sourceId={route} key={route} />
+      default:         return <Overview dq={dq} setRoute={setRoute} />
+    }
+  })()
+
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#0f1117' }}>
-      {/* Sidebar */}
-      <aside className="w-52 flex-shrink-0 flex flex-col border-r border-gray-800" style={{ background: '#080a0f' }}>
-        <div className="px-5 py-5 border-b border-gray-800">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-widest">Data Quality</p>
-          <p className="text-white font-semibold text-sm mt-0.5">Observability</p>
-        </div>
-
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {NAV.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setPage(item.id)}
-              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                page === item.id
-                  ? 'bg-indigo-500/20 text-indigo-300'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="px-3 py-4 border-t border-gray-800">
-          <button
-            onClick={() => setChatOpen(o => !o)}
-            className={`w-full px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
-              chatOpen
-                ? 'bg-indigo-500/20 text-indigo-300'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
-            }`}
-          >
-            <span>✦</span> AI Assistant
-          </button>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto">
-        {renderPage()}
-      </main>
-
-      {/* Chat panel */}
-      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
+    <div className="app">
+      <Sidebar route={route} setRoute={setRoute} dq={dq} onOpenAssistant={() => setAssistant(true)} />
+      <main className="main">{screen}</main>
+      <Assistant open={assistantOpen} onClose={() => setAssistant(false)} dq={dq} />
+      <Tweaks />
     </div>
   )
 }
