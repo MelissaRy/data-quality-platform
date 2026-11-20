@@ -64,6 +64,11 @@ logs/
 Thumbs.db
 Desktop.ini
 
+# ── Local agent / tool state ─────────────────────────────────────────────────
+.claude/
+.cursor/
+.aider*
+
 # ── IDEs ──────────────────────────────────────────────────────────────────────
 .idea/
 .vscode/

@@ -3,11 +3,12 @@ from typing import Annotated, Literal
 
 import anthropic
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 
 from api.db import get_pg
+from api.ratelimit import chat_budget, chat_limiter, client_key
 
 router = APIRouter()
 
@@ -81,7 +82,28 @@ async def _generate(messages: list[dict], context: str):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, pool: asyncpg.Pool = Depends(get_pg)):
+async def chat(
+    req: ChatRequest,
+    request: Request,
+    pool: asyncpg.Pool = Depends(get_pg),
+):
+    # Per-client limit first: a single noisy caller should not consume the
+    # shared daily budget before other visitors get a turn.
+    allowed, retry_after = chat_limiter.check(client_key(request))
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests — please wait a moment before asking again.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    if not chat_budget.check():
+        raise HTTPException(
+            status_code=503,
+            detail="The assistant has reached its daily demo budget. Please try again tomorrow.",
+            headers={"Retry-After": "3600"},
+        )
+
     context = await _quality_context(pool)
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
