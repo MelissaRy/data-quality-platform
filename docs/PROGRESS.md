@@ -346,7 +346,5 @@ docker run --rm --network host --env-file .env -e PORT=8002 dqp-app
 
 ## Git
 
-Repo: `MelissaRy/data-quality-platform` (private)
-Remote: `https://github.com/MelissaRy/data-quality-platform.git`
+Repo: `MelissaRy/data-quality-platform`
 Branch: `main`
-Commits authored as Melissa Ryberg only — no Co-Authored-By.
